@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ReadPalAI — On Holiday (Year 3)</title>
+<style>
+  :root{--brand:#2b6cb0;--accent:#2c7a7b;--muted:#6b7280;}
+  body{font-family:Inter,Segoe UI,Roboto,arial,sans-serif;margin:0;background:#f3f7fb;color:#0f172a;}
+  .wrap{max-width:880px;margin:28px auto;padding:20px;}
+  header{display:flex;align-items:center;gap:12px}
+  h1{margin:0;color:var(--brand);font-size:1.6rem}
+  .card{background:white;border-radius:12px;padding:18px;box-shadow:0 8px 30px rgba(15,23,42,0.06);margin-top:16px}
+  .row{display:flex;gap:12px;align-items:center}
+  textarea, input[type="text"]{width:100%;padding:12px;border-radius:8px;border:1px solid #e6eef8;font-size:1rem}
+  button{background:var(--brand);color:white;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:600}
+  button.ghost{background:transparent;color:var(--brand);border:1px solid #cfe0fb}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .passage{font-size:1.15rem;line-height:1.6;padding:12px;border-radius:8px;background:#f8fbff;border:1px solid #eaf3ff}
+  .word{display:inline-block;padding:4px 6px;border-radius:6px;margin:3px}
+  .ok{background:#d1fae5;color:#065f46}
+  .bad{background:#ffe4e6;color:#9f1239}
+  .output{margin-top:12px;padding:12px;background:#fbfdff;border-radius:8px;border:1px solid #eef6ff;min-height:64px}
+  .small{font-size:0.9rem;color:var(--muted)}
+  .controls-right{margin-left:auto}
+  .badge{background:#fff3cd;color:#92400e;padding:6px 8px;border-radius:8px;border:1px solid #ffe8a1;font-weight:700}
+  .flex{display:flex;gap:12px;align-items:center}
+  .spacer{height:12px}
+  footer{margin-top:18px;text-align:center;color:var(--muted);font-size:0.9rem}
+  @media(max-width:640px){header{flex-direction:column;align-items:flex-start}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>📖 ReadPalAI — Topic: On Holiday (Year 3)</h1>
+      <div class="small">AI-style reading buddy demo — live in the browser (Chrome recommended)</div>
+    </div>
+    <div style="margin-left:auto" class="flex">
+      <div class="badge">Demo v1</div>
+    </div>
+  </header>
+
+  <div class="card" id="mainCard">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1">
+        <label class="small">Student ID (e.g., 3A-01)</label>
+        <input id="studentId" type="text" placeholder="Enter student ID">
+      </div>
+      <div style="width:180px">
+        <label class="small">Passage</label>
+        <select id="passageSelect" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8">
+          <option value="p1">On Holiday — short</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+    <div id="passageCard" class="passage card">
+      <!-- passage words will render here -->
+    </div>
+
+    <div class="controls">
+      <button id="playModelBtn">🔊 Hear model reading</button>
+      <button id="listenBtn">🎤 Student: Read aloud</button>
+      <button id="repeatBtn" class="ghost">🔁 Try again</button>
+      <div style="margin-left:auto" class="small">Microphone: required</div>
+    </div>
+
+    <div class="output" id="resultBox">Press <strong>Read aloud</strong> and speak the passage clearly. The assistant will give instant feedback.</div>
+
+    <div class="spacer"></div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px 0">Comprehension Check</h3>
+      <div id="questionBox" class="small">Read first, then answer the questions below.</div>
+      <div id="mcqArea" style="margin-top:12px"></div>
+      <div style="margin-top:12px" class="controls">
+        <button id="submitMcqBtn">Submit Answers</button>
+        <button id="exportBtn" class="ghost">📥 Export results (CSV)</button>
+        <button id="clearBtn" class="ghost">🗑️ Clear saved data</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>Tip: Use Chrome on laptop or Android for best SpeechRecognition support. <br>Remember to get parental consent for voice recording in real classrooms.</footer>
+</div>
+
+<script>
+// ---------------- Passage data (Topic: On Holiday) ----------------
+const PASSAGES = {
+  p1: {
+    id: 'p1',
+    title: 'On Holiday — short',
+    text: "We are going to the beach. The sun is shining and the waves are big. We want to build a sandcastle and swim in the sea."
+  }
+};
+
+// ---------------- Utilities ----------------
+function clean(s){ return (s||'').toLowerCase().replace(/[^a-z0-9\\s']/g,'').replace(/\\s+/g,' ').trim(); }
+function splitWords(s){ const c = clean(s); return c? c.split(' ') : []; }
+
+// Levenshtein distance
+function levenshtein(a, b){
+  if(a===b) return 0;
+  if(a.length===0) return b.length;
+  if(b.length===0) return a.length;
+  const aLen = a.length, bLen = b.length;
+  let v0 = new Array(bLen+1), v1 = new Array(bLen+1);
+  for(let i=0;i<=bLen;i++) v0[i]=i;
+  for(let i=0;i<aLen;i++){
+    v1[0]=i+1;
+    for(let j=0;j<bLen;j++){
+      const cost = a[i]===b[j]?0:1;
+      v1[j+1] = Math.min(v1[j]+1, v0[j+1]+1, v0[j]+cost);
+    }
+    v0 = v1.slice();
+  }
+  return v0[bLen];
+}
+
+// compute similarity 0..1
+function similarity(a,b){
+  const maxLen = Math.max(a.length, b.length);
+  if(maxLen===0) return 1;
+  const dist = levenshtein(a, b);
+  return 1 - (dist / maxLen);
+}
+
+// ---------------- Render passage ----------------
+const passageEl = document.getElementById('passageCard');
+const passageSelect = document.getElementById('passageSelect');
+const resultBox = document.getElementById('resultBox');
+const mcqArea = document.getElementById('mcqArea');
+let currentPassage = PASSAGES['p1'];
+
+function renderPassage(){
+  const words = currentPassage.text.split(/\\s+/);
+  passageEl.innerHTML = '';
+  words.forEach(w => {
+    const span = document.createElement('span');
+    span.className = 'word';
+    span.textContent = w.replace(/(^\\s+|\\s+$)/g,'');
+    passageEl.appendChild(span);
+  });
+}
+renderPassage();
+
+// ---------------- Speech Recognition & TTS ----------------
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+if(SpeechRecognition){
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-GB'; // or en-US
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+} else {
+  resultBox.innerText = 'SpeechRecognition not supported in this browser. Use Chrome or Edge.';
+}
+
+function speak(text, cb){
+  if('speechSynthesis' in window){
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    u.pitch = 1.0;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+    if(cb) u.onend = cb;
+  } else {
+    if(cb) cb();
+  }
+}
+
+// model reading button
+document.getElementById('playModelBtn').addEventListener('click', ()=>{
+  speak(currentPassage.text);
+});
+
+// listen button
+document.getElementById('listenBtn').addEventListener('click', ()=>{
+  if(!recognition){ alert('SpeechRecognition not available'); return; }
+  resultBox.innerHTML = '<strong>Listening...</strong> Speak clearly into the microphone.';
+  try{
+    recognition.start();
+  }catch(e){ recognition.stop(); recognition.start(); }
+});
+
+// retry
+document.getElementById('repeatBtn').addEventListener('click', ()=>{
+  resultBox.innerText = 'Ready — press Read aloud to try again.';
+});
+
+// handle recognition result
+if(recognition){
+  recognition.onresult = (ev)=>{
+    const spoken = ev.results[0][0].transcript;
+    processSpoken(spoken);
+  };
+  recognition.onerror = (ev)=>{
+    resultBox.innerText = 'Error from recognition: ' + ev.error;
+  };
+}
+
+// ---------------- Evaluate reading ----------------
+function processSpoken(transcript){
+  const studentId = (document.getElementById('studentId').value || 'guest').trim();
+  resultBox.innerHTML = `<div class="small"><strong>Heard:</strong> ${transcript}</div>`;
+  // compare word-by-word
+  const expected = splitWords(currentPassage.text);
+  const heard = splitWords(transcript);
+  const results = [];
+  let correctCount = 0;
+  for(let i=0;i<expected.length;i++){
+    const exp = expected[i];
+    const rec = heard[i] || '';
+    const sim = similarity(exp, rec);
+    const ok = sim >= 0.6;
+    results.push({expected:exp, heard:rec, ok, sim});
+    if(ok) correctCount++;
+  }
+  // highlight words
+  const spans = passageEl.querySelectorAll('.word');
+  spans.forEach((sp,i)=>{
+    sp.classList.remove('ok','bad');
+    if(results[i] && results[i].ok) sp.classList.add('ok');
+    else sp.classList.add('bad');
+  });
+  const pct = Math.round((correctCount / expected.length) * 100);
+  const wrong = results.filter(r=>!r.ok).map(r=>r.expected);
+  // feedback message
+  let fb = '';
+  if(wrong.length===0){
+    fb = '🌟 Perfect! Great reading. Keep going!';
+    speak('Great job! You read all the words clearly.');
+  } else {
+    fb = `⚠️ Words to practice: ${wrong.join(', ')}`;
+    speak(`Good try. I suggest you practice: ${wrong[0]}.`);
+  }
+  resultBox.innerHTML += `<div style="margin-top:8px"><strong>Score:</strong> ${pct}% — ${correctCount}/${expected.length} words</div>`;
+  resultBox.innerHTML += `<div style="margin-top:8px;color:#0b0b0b"><strong>Feedback:</strong> ${fb}</div>`;
+
+  // save to localStorage
+  const record = {
+    timestamp: new Date().toISOString(),
+    studentId,
+    passageId: currentPassage.id,
+    transcript,
+    score: pct,
+    wrongWords: wrong
+  };
+  saveRecord(studentId, record);
+
+  // prepare MCQs based on passage (simple fixed Qs for demo)
+  prepareMCQs();
+}
+
+// ---------------- Storage ----------------
+function saveRecord(studentId, record){
+  const key = 'readpal_records';
+  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  arr.push(record);
+  localStorage.setItem(key, JSON.stringify(arr));
+}
+
+// export CSV
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  const key = 'readpal_records';
+  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  if(arr.length===0){ alert('No records saved yet.'); return; }
+  const header = ['timestamp','studentId','passageId','score','transcript','wrongWords'];
+  const rows = arr.map(r => [r.timestamp, r.studentId, r.passageId, r.score, '"' + r.transcript.replace(/"/g,'""') + '"', '"' + r.wrongWords.join(',') + '"']);
+  const csv = [header.join(',')].concat(rows.map(r=>r.join(','))).join('\\n');
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'readpal_records.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+// clear saved data
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  if(confirm('Clear saved ReadPal data from this browser?')){
+    localStorage.removeItem('readpal_records');
+    alert('Cleared.');
+  }
+});
+
+// ---------------- MCQ logic (demo) ----------------
+function prepareMCQs(){
+  const html = [];
+  // Q1
+  html.push('<div><strong>1. Where are the children going?</strong></div>');
+  html.push('<label><input type="radio" name="q1" value="a"> To the beach</label><br>');
+  html.push('<label><input type="radio" name="q1" value="b"> To the zoo</label><br>');
+  html.push('<label><input type="radio" name="q1" value="c"> To school</label><br>');
+  // Q2
+  html.push('<div style="margin-top:8px"><strong>2. What do they want to build?</strong></div>');
+  html.push('<label><input type="radio" name="q2" value="a"> A sandcastle</label><br>');
+  html.push('<label><input type="radio" name="q2" value="b"> A treehouse</label><br>');
+  html.push('<label><input type="radio" name="q2" value="c"> A robot</label><br>');
+  mcqArea.innerHTML = html.join('');
+}
+
+document.getElementById('submitMcqBtn').addEventListener('click', ()=>{
+  const q1 = document.querySelector('input[name="q1"]:checked');
+  const q2 = document.querySelector('input[name="q2"]:checked');
+  if(!q1 || !q2){ alert('Please answer both questions.'); return; }
+  let score = 0;
+  if(q1.value === 'a') score += 1;
+  if(q2.value === 'a') score += 1;
+  // speak feedback
+  speak(`You scored ${score} out of 2 on the comprehension check.`);
+  // show on UI
+  document.getElementById('questionBox').innerHTML = `You scored <strong>${score}</strong> / 2 on these questions.`;
+  // append to last record if exists
+  const key = 'readpal_records';
+  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  if(arr.length>0){
+    const last = arr[arr.length-1];
+    last.comprehension = score;
+    localStorage.setItem(key, JSON.stringify(arr));
+  }
+});
+
+// ---------------- init ----------------
+prepareMCQs();
+
+</script>
+</body>
+</html>
